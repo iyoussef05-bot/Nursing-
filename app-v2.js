@@ -14,6 +14,9 @@ const DIFF_AR = { Easy: "سهل", Medium: "متوسط", Hard: "صعب" };
 const PASS = 70;
 const isAr = s => /[\u0600-\u06FF]/.test(String(s || ""));
 const dirOf = s => isAr(s) ? "rtl" : "ltr";
+const getLang = () => { try { return localStorage.getItem("ns-lang") || "en"; } catch (e) { return "en"; } };
+const setLang = l => { try { localStorage.setItem("ns-lang", l); } catch (e) {} };
+const view = (it, lang) => (lang === "ar" && it.ar) ? it.ar : it;
 const emailOf = id => `${String(id).trim().toLowerCase()}@${EMAIL_DOMAIN}`;
 
 const S = { user: null, tab: "results", exam: null, loginErr: "", selExam: "",
@@ -172,11 +175,14 @@ function preExam({ e, a }) {
   };
 }
 function renderExam() {
-  const X = S.exam, it = X.a.items[X.i];
+  const X = S.exam, it0 = X.a.items[X.i];
+  X.lang = X.lang || getLang();
+  const it = view(it0, X.lang);
   const wm = Array(40).fill(`${esc(S.user.empId)} · ${esc(S.user.name)}`).map(t => `<span>${t}</span>`).join("");
   $("#app").innerHTML = `<div class="exam"><div class="wm" aria-hidden="true">${wm}</div>
    <section class="card">
     <div class="qhead"><span class="small muted">سؤال ${X.i + 1} من ${X.a.items.length}</span><div class="prog"><i style="width:${pct(X.i, X.a.items.length)}%"></i></div><span class="timer${X.left <= 10 ? " low" : ""}" id="tm">${X.left}</span></div>
+    ${it0.ar ? `<div class="row" style="justify-content:flex-end"><button class="btn sm" id="lang" aria-label="تغيير لغة السؤال">${X.lang === "ar" ? "English" : "عربي"}</button></div>` : ""}
     ${X.tabs ? `<div class="warnbar">تم تسجيل خروجك من الامتحان ${X.tabs} مرة. هذا يظهر للمسؤول.</div>` : ""}
     <div class="stem" dir="${dirOf(it.stem)}">${esc(it.stem)}</div>
     <div class="opts" dir="${dirOf(it.stem)}">${it.opts.map((o, i) => `<button class="opt" data-i="${i}" aria-pressed="${X.sel === i}"><span class="k">${(isAr(it.stem) ? "أبجد" : "abcd")[i]}</span><span>${esc(o)}</span></button>`).join("")}</div>
@@ -184,6 +190,7 @@ function renderExam() {
    </section></div>`;
   $$(".opt").forEach(b => b.onclick = () => { X.sel = +b.dataset.i; $$(".opt").forEach(o => o.setAttribute("aria-pressed", o === b)); $("#nx").disabled = false; });
   $("#nx").onclick = () => commit(false);
+  if ($("#lang")) $("#lang").onclick = () => { X.lang = X.lang === "ar" ? "en" : "ar"; setLang(X.lang); renderExam(); };
   clearInterval(X.timer);
   X.timer = setInterval(() => {
     X.left--; const t = $("#tm"); if (t) { t.textContent = X.left; t.classList.toggle("low", X.left <= 10); }
@@ -228,21 +235,25 @@ document.addEventListener("contextmenu", e => { if (S.exam) e.preventDefault(); 
 document.addEventListener("copy", e => { if (S.exam) e.preventDefault(); });
 
 function showReview(a, e, back, adminView) {
-  const rv = a.review;
-  $("#app").innerHTML = `<section class="card"><div class="row"><h2 class="grow">${esc(e.title)}</h2><button class="btn sm" id="bk">رجوع</button></div>
+  const rv = a.review, L = getLang(), hasAr = a.items.some(x => x.ar || S.questions[x.qid]?.ar);
+  $("#app").innerHTML = `<section class="card"><div class="row"><h2 class="grow">${esc(e.title)}</h2>${hasAr ? `<button class="btn sm" id="rlang">${L === "ar" ? "English" : "عربي"}</button>` : ""}<button class="btn sm" id="bk">رجوع</button></div>
    <p class="muted small" style="margin:0">${esc(a.name)} · ${a.score ?? "—"}/${a.total}</p>
-   ${a.items.map((it, i) => {
+   ${a.items.map((it0, i) => {
+     const qd = S.questions[it0.qid];
+     const it = (L === "ar" && !it0.ar && adminView && qd?.ar) ? { ...it0, ar: { stem: qd.ar.stem, opts: it0.order.map(k => qd.ar.opts[k]) } } : it0;
+     const v = view(it, L);
      const ch = a.answers?.[i] ?? -1;
      const c = adminView ? it.order.indexOf("ABCD".indexOf(S.questions[it.qid]?.correct)) : rv?.[i]?.c;
-     const rat = adminView ? S.questions[it.qid]?.rat : rv?.[i]?.rat;
+     const rat = adminView ? ((L === "ar" && qd?.ar?.rat) || qd?.rat) : ((L === "ar" && rv?.[i]?.ratAr) || rv?.[i]?.rat);
      const ok = ch === c;
-     const ar = isAr(it.stem);
-     return `<div class="review ${ok ? "ok" : "no"}" dir="${dirOf(it.stem)}"><b>${i + 1}. ${esc(it.stem)}</b>
-      <span>${ar ? "إجابتك" : "Answer"}: ${ch >= 0 ? esc(it.opts[ch]) : (ar ? "— (انتهى الوقت)" : "— (time out)")} ${ok ? "✓" : "✗"}</span>
-      ${ok || c == null || c < 0 ? "" : `<span style="color:var(--good)">${ar ? "الإجابة الصحيحة" : "Correct"}: ${esc(it.opts[c])}</span>`}
-      ${rat ? `<span class="muted small">${esc(rat)}</span>` : ""}${adminView ? `<span class="muted small">${esc(it.qid)}</span>` : ""}</div>`;
+     const ar = isAr(v.stem);
+     return `<div class="review ${ok ? "ok" : "no"}" dir="${dirOf(v.stem)}"><b>${i + 1}. ${esc(v.stem)}</b>
+      <span>${ar ? "إجابتك" : "Answer"}: ${ch >= 0 ? esc(v.opts[ch]) : (ar ? "— (انتهى الوقت)" : "— (time out)")} ${ok ? "✓" : "✗"}</span>
+      ${ok || c == null || c < 0 ? "" : `<span style="color:var(--good)">${ar ? "الإجابة الصحيحة" : "Correct"}: ${esc(v.opts[c])}</span>`}
+      ${rat ? `<span class="muted small">${esc(rat)}</span>` : ""}${adminView ? `<span class="muted small">${esc(it0.qid)}</span>` : ""}</div>`;
    }).join("")}</section>`;
   $("#bk").onclick = back;
+  if ($("#rlang")) $("#rlang").onclick = () => { setLang(L === "ar" ? "en" : "ar"); showReview(a, e, back, adminView); };
 }
 
 /* ---------- admin data ---------- */
@@ -265,7 +276,7 @@ async function loadAttempts(eid, force) {
   return S.attempts[eid];
 }
 function reviewFor(a) {
-  return a.items.map(it => { const q = S.questions[it.qid]; return { c: q ? it.order.indexOf("ABCD".indexOf(q.correct)) : -1, rat: q ? q.rat : "" }; });
+  return a.items.map(it => { const q = S.questions[it.qid]; return { c: q ? it.order.indexOf("ABCD".indexOf(q.correct)) : -1, rat: q ? q.rat : "", ratAr: q?.ar?.rat || "" }; });
 }
 async function gradeAttempts(eid) {
   const e = examById(eid), ops = [];
@@ -287,7 +298,9 @@ function drawItems(exam) {
   exam.picks.forEach(p => {
     shuffle(all.filter(q => q.topic === p.topic && q.diff === p.diff)).slice(0, p.n).forEach(q => {
       const order = shuffle([0, 1, 2, 3]);
-      out.push({ qid: q.id, stem: q.stem, opts: order.map(k => q.opts[k]), order });
+      const it = { qid: q.id, stem: q.stem, opts: order.map(k => q.opts[k]), order };
+      if (q.ar && q.ar.opts?.length === 4) it.ar = { stem: q.ar.stem, opts: order.map(k => q.ar.opts[k]) };
+      out.push(it);
     });
   });
   return shuffle(out);
@@ -535,6 +548,9 @@ function aBank() {
       if (status === "delete" || (onlyAppr && status !== "approved")) { skipped++; return; }
       const q = { topic: g("topic"), level: g("level"), diff: g("difficulty"), type: g("type"), stem: g("question"), opts: [g("a"), g("b"), g("c"), g("d")], correct: g("correct").toUpperCase(), rat: g("rationale") };
       if (!DIFFS.includes(q.diff) || !"ABCD".includes(q.correct) || q.correct.length !== 1 || !q.stem || q.opts.some(o => !o) || /[\/.#\[\]]/.test(g("id"))) { bad.push(g("id") || `row ${i + 2}`); return; }
+      const ga = n => col(n) >= 0 ? String(r[col(n)] ?? "").trim() : "";
+      const ar = { stem: ga("question_ar"), opts: [ga("a_ar"), ga("b_ar"), ga("c_ar"), ga("d_ar")], rat: ga("rationale_ar") };
+      if (ar.stem && ar.opts.every(Boolean)) q.ar = ar;
       ops.push([g("id"), q]);
     });
     $("#blog").textContent = "جاري الرفع…";
